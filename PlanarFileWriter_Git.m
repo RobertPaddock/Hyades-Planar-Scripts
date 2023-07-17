@@ -1,0 +1,249 @@
+%Script to write Hyades planar input decks. First run the planar meshing
+%script to get the correct meshing variables. Then run this to produce the
+%input decks.
+
+%This input deck will be for a planar sandwich target, with the surface of
+%the first layer irradiated by a laser for 2ns.
+
+%The meshing is currently set in a for loop to produce input decks with
+%different laser powers/frequencies. The arrays below contain 4 elements -
+%element i of each array will be used for Filei
+
+%Set the desired laser intensity (in TW/cm^2)
+Pulse1Power = [47 94 141 47]; 
+
+%Set the desired frequency (3 for third harmonic, 2 for second)
+Freq = [3 3 3 2];
+
+%Choose the material for the final layer - SiO2 or CH.
+Material = "SiO2";
+%  Material = "CH";
+
+%To make changes to the target, the meshing script will first need to be
+%updated to mesh the new target. Then, code below will need to be updated
+%to express this new meshing, and update the atomic compositions and EOS of
+%the different layers.
+
+for ArrayIndex = 1:length(Pulse1Power)
+
+%Set timings     
+LaserEndTime = 2.0E-9;
+RiseTime = 2E-10;
+TimeSpacing = [1E-11]; 
+GaussPulse = 0;   
+%Different end time chosen depending on laser frequency
+if Freq(ArrayIndex) == 3
+    ChangeTimeAt = [0 5]*10^-9;
+elseif Freq(ArrayIndex) == 2
+    ChangeTimeAt = [0 6]*10^-9;
+end
+    
+    
+%Converts Pulse Power in TW into erg
+Pulse1erg = Pulse1Power(ArrayIndex) * 10^19;
+if exist('Pulse2Time','var')==1
+Pulse2erg = Pulse2Power *10^19;
+end
+
+%Output timing
+Time=[0];
+for i=1:(length(ChangeTimeAt)-1)
+    Time = [Time, (ChangeTimeAt(i)+TimeSpacing(i)):TimeSpacing(i):ChangeTimeAt(i+1)];
+end
+
+%Print the file
+filename = sprintf(['File', num2str(ArrayIndex)]);
+filepath = sprintf(['MultiFile/', filename, '.inf']);
+fileID = fopen(filepath,'w');
+
+%First two lines include file name, and geometry choice (1 is planar)
+fprintf(fileID,'%s\r\nc\r\n', filename);
+fprintf(fileID,'geometry 1 \r\nc\r\n');
+
+%Set temp of the three materials
+IonTempAll = 2.499e-05;
+
+%Calculates relevant boundaries from layers. The Layers variables are
+%generated in the meshing script. If changing the target, these variables
+%will need to be updated, and lines possibly added/removed. 
+BoundaryCH = LayersCH+1;
+BoundaryGold = BoundaryCH+LayersGold;
+BoundaryQuartz = BoundaryGold+LayersQuartz;
+BoundaryFoam = BoundaryQuartz + LayersFoam;
+
+%Do meshing input deck lines. The ordered variables are: mesh number of
+%left edge, mesh number of right edge, x position of left edge, x position
+%of right edge, ratio of mesh thicknesses through the region
+fprintf(fileID,'mesh 1 %.0f 0 %.6e %.6e \r\n', BoundaryCH, CHLength, RatioCH);
+fprintf(fileID,'mesh %.0f %.0f %.6e %.6e %.6e \r\n', BoundaryCH, BoundaryGold, CHLength, CHLength+GoldLength, RatioGold);
+fprintf(fileID,'mesh %.0f %.0f %.6e %.6e %.6e \r\n', BoundaryGold, BoundaryQuartz, CHLength+GoldLength, CHLength+GoldLength+QuartzLength, RatioQuartz);
+fprintf(fileID,'mesh %.0f %.0f %.6e %.6e %.6e \r\nc\r\n', BoundaryQuartz, BoundaryFoam, CHLength+GoldLength+QuartzLength, CHLength+GoldLength+QuartzLength+FoamLength, RatioFoam);
+
+%Do meshing lines. Format is left hand mesh edge, right hand mesh edge,
+%region number, density, temperature
+fprintf(fileID, 'region 1 %.0f 1 %.3e %.3e \r\n', LayersCH, DensityCH, IonTempAll);
+fprintf(fileID, 'region %.0f %.0f 2 %.3e %.3e \r\n', BoundaryCH, (BoundaryGold-1), DensityGold, IonTempAll);
+fprintf(fileID, 'region %.0f %.0f 3 %.3e %.3e \r\n', BoundaryGold, (BoundaryQuartz-1), DensityQuartz, IonTempAll);
+fprintf(fileID, 'region %.0f %.0f 4 %.3e %.3e \r\nc\r\n', BoundaryQuartz, (BoundaryFoam-1), DensityFoam, IonTempAll);
+
+%Do atomic composion lines. Need to specify the atomic composition of the
+%material in each region. Format is region mumber, atomic number, atomic
+%mass, atomic fraction
+fprintf(fileID, 'material 1 1. 2.014  0.5 \r\n');
+fprintf(fileID, 'material 1 6. 12.012 0.5 \r\n');
+fprintf(fileID, 'material 2 au \r\n');
+fprintf(fileID, 'material 3 sio2 \r\n');
+if Material == "CH";
+    fprintf(fileID, 'material 4 1. 2.014  0.5 \r\n');
+    fprintf(fileID, 'material 4 6. 12.012 0.5 \r\nc\r\n');
+elseif Material == "SiO2";
+    fprintf(fileID, 'material 4 sio2 \r\nc\r\n');
+end
+
+%Eos lines. Point to file location for relevant EOS table, and then provide
+%region number.
+fprintf(fileID, 'eos /work4/clf/rad_hydro/hyades/EOS-Opacity/EOS//eos_32.dat 1 \r\n');
+fprintf(fileID, 'eos /work4/clf/rad_hydro/hyades/EOS-Opacity/EOS//eos_51.dat 2 \r\n');
+if QuartzType == 1
+    fprintf(fileID, 'eos /work4/clf/rad_hydro/hyades/EOS-Opacity/EOS//eos_24.dat 3 \r\n'); %Silica EOS
+else
+fprintf(fileID, 'eos /work4/clf/rad_hydro/hyades/EOS-Opacity/EOS//eos_22.dat 3 \r\n'); %Quartz EOS
+end
+
+if Material == "CH";
+    fprintf(fileID, 'eos /work4/clf/rad_hydro/hyades/EOS-Opacity/EOS//eos_32.dat 4 \r\nc\r\n');
+elseif Material == "SiO2";
+fprintf(fileID, 'eos /work4/clf/rad_hydro/hyades/EOS-Opacity/EOS//eos_24.dat 4 \r\nc\r\n'); %Silica EOS
+end
+
+%Eos extrapolation rules for each region.
+fprintf(fileID, 'eosxtrp  1  1  2  1  2 \r\n');
+fprintf(fileID, 'eosxtrp  2  1  2  1  2 \r\n');
+fprintf(fileID, 'eosxtrp  3  1  2  1  2 \r\n');
+fprintf(fileID, 'eosxtrp  4  1  2  1  2 \r\nc\r\n');
+
+%Ionisation model for each region.
+fprintf(fileID, 'ioniz 1 4 \r\n');
+fprintf(fileID, 'ioniz 2 4 \r\n');
+fprintf(fileID, 'ioniz 3 4 \r\n');
+fprintf(fileID, 'ioniz 4 4 \r\nc\r\n');
+
+%First laser line - set laser frequency
+if Freq(ArrayIndex) == 3
+    fprintf(fileID, 'source laser 0.351 +1 \r\n');
+elseif Freq(ArrayIndex) == 2
+    fprintf(fileID, 'source laser 0.532 +1 \r\n');
+end
+
+%Print laser lines - timing vs power profile, with linear extrapolation.
+if GaussPulse == 1
+     GaussResolution = RiseTime/100;
+    FWHM = RiseTime/4;
+       
+    GaussTimes = [GaussResolution:GaussResolution:RiseTime];
+    RisePower = Pulse1erg .* exp( - (GaussTimes - RiseTime).^2 / (2*FWHM^2));
+    TopTime = [GaussTimes LaserEndTime (LaserEndTime+GaussTimes)];
+    LaserTimes = [0 GaussTimes LaserEndTime (LaserEndTime + GaussTimes)];
+    LaserPowers = [0 RisePower Pulse1erg fliplr(RisePower)];
+    
+    for i=1:length(LaserTimes)-1
+        fprintf(fileID, 'tv %.3e %.3e \r\n', LaserTimes(i), LaserPowers(i));
+    end
+    fprintf(fileID, 'tv %.3e %.3e \r\nc\r\n', LaserTimes(end), LaserPowers(end));
+        
+else
+    
+    fprintf(fileID, 'tv 0. 0. \r\n');
+    fprintf(fileID, 'tv %.3e %.3e \r\n', RiseTime, Pulse1erg);
+    if exist('Pulse2Time','var')==0
+        fprintf(fileID, 'tv %.3e %.3e \r\n', (LaserEndTime), Pulse1erg);
+    else
+        fprintf(fileID, 'tv %.3e %.3e \r\n', Pulse2Time, Pulse1erg);
+        fprintf(fileID, 'tv %.3e %.3e \r\n', (Pulse2Time+RiseTime), Pulse2erg);
+        fprintf(fileID, 'tv %.3e %.3e \r\n', (LaserEndTime), Pulse2erg);
+    end
+    fprintf(fileID, 'tv %.3e 0. \r\nc\r\n', (LaserEndTime+RiseTime));
+    
+end
+
+%Radiation groups
+fprintf(fileID, 'group  0 20 0.03 1.0 \r\n');
+fprintf(fileID, 'group 20 50 1.00 5.0 \r\n');
+fprintf(fileID, 'group 50 70 5.00 300.0 \r\nc\r\n');
+%General settings
+fprintf(fileID, 'pparray rho te ti tr pres R Rcm zbar u deplas xlsint vol bpeprd bpeprdr bpedep dene eion eelc TNDENI \r\nc\r\n');
+fprintf(fileID, 'parm xlibam 1.0 \r\n');
+fprintf(fileID, 'parm flxlem 0.050 \r\n');
+fprintf(fileID, 'parm flxlim 0.4 \r\n');
+fprintf(fileID, 'parm alvism 0.3 \r\n');
+fprintf(fileID, 'parm aqvism 2.0 \r\n');
+fprintf(fileID, 'parm qstimx 4.3e-5 \r\n');
+fprintf(fileID, 'parm lrdtrn 1 \r\n');
+fprintf(fileID, 'parm temin 1.551e-06 \r\n');
+fprintf(fileID, 'parm timin 1.551e-06 \r\n');
+fprintf(fileID, 'parm irdtrn 2 \r\n');
+fprintf(fileID, 'parm nstop 1e8 \r\n');
+fprintf(fileID, 'parm dt 1e-15 \r\n');
+fprintf(fileID, 'parm dtmin 1e-25  \r\n');
+fprintf(fileID, 'parm JHTRMX 200 \r\n');
+for i=2:1:(length(ChangeTimeAt)-1)
+    fprintf(fileID, 'change %.4e postdt %.4e \n', ChangeTimeAt(i), TimeSpacing(i));
+end
+fprintf(fileID,'parm postdt %.4e \n', TimeSpacing(1));
+fprintf(fileID,'parm tstop %.4e \n', ChangeTimeAt(end));
+
+
+
+
+fclose(fileID);
+
+end
+
+
+
+%Function to recreate the Hyades mesh function - given the mesh boundaries
+%j and radii to stretch between r and the ratio, it will create the mesh
+%coordinates.
+function Radii = RatioIncrement(j1, j2, r1, r2, Ratio)
+Index = (1+j1-j1):(j2-j1);
+Increment = Ratio.^(Index);
+Radius = cumsum(Increment);
+Scaling = (r2-r1)/Radius(end);
+Radii = [r1+(Radius*Scaling)];
+end
+
+%Given the radii and density, will calculate the mass difference between
+%zones and return the mean of the square of this value.
+function [MaxDiff, ZoneMass, MassDiff] = MassDifference(Radii, Density)
+Vol = (4/3) * pi() * (Radii.^3);
+ZoneMass = diff(Vol).*Density;
+MassDiff = 100*(diff(ZoneMass)./ZoneMass(2:end));
+%Good results for the mean of the quadrature. This function takes the
+%mean of quadrature of only those values with a mass difference above
+%1.5 (bear in mind the vapour layer is not optimised, so early high
+%values are constant).
+MaxDiff = mean((abs(MassDiff).*(abs(MassDiff)>2)).^2);
+end
+
+%Optimisation function. Given the Ratios, Radii and Layers, will construct
+%the mesh and calculate the mass difference using above functions.
+function [MaxDiff, Radii, Density] = BoundarySolver(RatioVapour, RatioSplit, RatioIce, RatioCH, LayersVapour, LayersSplit, LayersIce, LayersCH, RadiusVapour,RadiusSplit, RadiusIce, RadiusCH, DensityVapour, DensityIce, DensityCH)
+
+BoundaryVapour = LayersVapour+1;
+BoundarySplit = BoundaryVapour + LayersSplit;
+BoundaryIce = BoundarySplit + LayersIce;
+BoundaryCH = BoundaryIce + LayersCH;
+
+VapourRadii = RatioIncrement(1, BoundaryVapour, 0, RadiusVapour, RatioVapour);
+SplitRadii = RatioIncrement(BoundaryVapour, BoundarySplit, RadiusVapour, RadiusSplit, RatioSplit);
+IceRadii = RatioIncrement(BoundarySplit, BoundaryIce, RadiusSplit, RadiusIce, RatioIce);
+CHRadii = RatioIncrement(BoundaryIce, BoundaryCH, RadiusIce, RadiusCH, RatioCH);
+
+Density = [DensityVapour*ones(1, LayersVapour), DensityIce*ones(1, (LayersIce+LayersSplit)), DensityCH*ones(1, LayersCH)];
+
+Radii = [0, VapourRadii, SplitRadii, IceRadii, CHRadii];
+MaxDiff = MassDifference(Radii, Density);
+
+end
+
+
